@@ -33,5 +33,5 @@ clean: kokkos-clean
 
 # Compilation rules
 
-%.o:%.cc$(KOKKOS_CPP_DEPENDS)
+%.o:%.cc $(KOKKOS_CPP_DEPENDS)
 	$(CXX) $(KOKKOS_CPPFLAGS) $(KOKKOS_CXXFLAGS) $(CXXFLAGS) $(EXTRA_INC) -c $<

@@ -156,9 +156,7 @@ Additional BSD Notice
 #include <iostream>
 #include <unistd.h>
 
-#if _OPENMP
-# include <omp.h>
-#endif
+#include <Kokkos_Core.hpp>
 
 #include "lulesh.h"
 
@@ -2768,6 +2766,9 @@ int main(int argc, char *argv[])
 //debug to see region sizes
 //   for(Int_t i = 0; i < locDom->numReg(); i++)
 //      std::cout << "region" << i + 1<< "size" << locDom->regElemSize(i) <<std::endl;
+  
+  //Initialize Kokkos
+  Kokkos::initialize(argc,argv);
    while((locDom->time() < locDom->stoptime()) && (locDom->cycle() < opts.its)) {
 
       TimeIncrement(*locDom) ;
@@ -2778,6 +2779,8 @@ int main(int argc, char *argv[])
                 locDom->cycle(), double(locDom->time()), double(locDom->deltatime()) ) ;
       }
    }
+  // Shutdown Kokkos
+  Kokkos::finalize();
 
    // Use reduced max elapsed time
    double elapsed_time;
