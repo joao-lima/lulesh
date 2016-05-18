@@ -57,6 +57,7 @@ inline real8  FABS(real8  arg) { return fabs(arg) ; }
 inline real10 FABS(real10 arg) { return fabsl(arg) ; }
 
 typedef Kokkos::View<Real_t*> real_t_view_1d;
+typedef Kokkos::View<Index_t*> index_t_view_1d;
 
 // Stuff needed for boundary conditions
 // 2 BCs on each of 6 hexahedral faces (12 bits)
@@ -145,6 +146,9 @@ class Domain {
       m_x.resize(numNode);  // coordinates
       m_y.resize(numNode);
       m_z.resize(numNode);
+      m_x_view = real_t_view_1d(m_x.data(), numNode);
+      m_y_view = real_t_view_1d(m_y.data(), numNode);
+      m_z_view = real_t_view_1d(m_z.data(), numNode);
 
       m_xd.resize(numNode); // velocities
       m_yd.resize(numNode);
@@ -157,6 +161,9 @@ class Domain {
       m_fx.resize(numNode);  // forces
       m_fy.resize(numNode);
       m_fz.resize(numNode);
+      m_fx_view = real_t_view_1d(m_fx.data(), numNode);
+      m_fy_view = real_t_view_1d(m_fy.data(), numNode);
+      m_fz_view = real_t_view_1d(m_fz.data(), numNode);
 
       m_nodalMass.resize(numNode);  // mass
    }
@@ -164,6 +171,7 @@ class Domain {
    void AllocateElemPersistent(Int_t numElem) // Elem-centered
    {
       m_nodelist.resize(8*numElem);
+      m_nodelist_view = index_t_view_1d(m_nodelist.data(), 8*numElem);
 
       // elem connectivities through face
       m_lxim.resize(numElem);
@@ -245,6 +253,10 @@ class Domain {
    Real_t& x(Index_t idx)    { return m_x[idx] ; }
    Real_t& y(Index_t idx)    { return m_y[idx] ; }
    Real_t& z(Index_t idx)    { return m_z[idx] ; }
+   
+   real_t_view_1d& x_view()        { return m_x_view; }
+   real_t_view_1d& y_view()        { return m_y_view; }
+   real_t_view_1d& z_view()        { return m_z_view; }
 
    // Nodal velocities
    Real_t& xd(Index_t idx)   { return m_xd[idx] ; }
@@ -260,6 +272,10 @@ class Domain {
    Real_t& fx(Index_t idx)   { return m_fx[idx] ; }
    Real_t& fy(Index_t idx)   { return m_fy[idx] ; }
    Real_t& fz(Index_t idx)   { return m_fz[idx] ; }
+
+   real_t_view_1d& fx_view()        { return m_fx_view; }
+   real_t_view_1d& fy_view()        { return m_fy_view; }
+   real_t_view_1d& fz_view()        { return m_fz_view; }
 
    // Nodal mass
    Real_t& nodalMass(Index_t idx) { return m_nodalMass[idx] ; }
@@ -282,6 +298,7 @@ class Domain {
    Index_t&  regElemlist(Int_t r, Index_t idx) { return m_regElemlist[r][idx] ; }
 
    Index_t*  nodelist(Index_t idx)    { return &m_nodelist[Index_t(8)*idx] ; }
+   index_t_view_1d& nodelist_view()   { return m_nodelist_view; }
 
    // elem connectivities through face
    Index_t&  lxim(Index_t idx) { return m_lxim[idx] ; }
@@ -438,6 +455,9 @@ class Domain {
    std::vector<Real_t> m_x ;  /* coordinates */
    std::vector<Real_t> m_y ;
    std::vector<Real_t> m_z ;
+   real_t_view_1d m_x_view;
+   real_t_view_1d m_y_view;
+   real_t_view_1d m_z_view;
 
    std::vector<Real_t> m_xd ; /* velocities */
    std::vector<Real_t> m_yd ;
@@ -450,6 +470,9 @@ class Domain {
    std::vector<Real_t> m_fx ;  /* forces */
    std::vector<Real_t> m_fy ;
    std::vector<Real_t> m_fz ;
+   real_t_view_1d m_fx_view;
+   real_t_view_1d m_fy_view;
+   real_t_view_1d m_fz_view;
 
    std::vector<Real_t> m_nodalMass ;  /* mass */
 
@@ -467,6 +490,7 @@ class Domain {
    Index_t **m_regElemlist ;  // region indexset 
 
    std::vector<Index_t>  m_nodelist ;     /* elemToNode connectivity */
+   index_t_view_1d m_nodelist_view;
 
    std::vector<Index_t>  m_lxim ;  /* element connectivity across each face */
    std::vector<Index_t>  m_lxip ;

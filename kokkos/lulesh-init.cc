@@ -103,7 +103,7 @@ Domain::Domain(Int_t numRanks, Index_t colLoc,
 
    BuildMesh(nx, edgeNodes, edgeElems);
 
-#if _OPENMP
+#if 1
    SetupThreadSupportStructures();
 #else
    // These arrays are not used if we're not threaded
@@ -242,11 +242,7 @@ Domain::BuildMesh(Int_t nx, Int_t edgeNodes, Int_t edgeElems)
 void
 Domain::SetupThreadSupportStructures()
 {
-#if _OPENMP
-   Index_t numthreads = omp_get_max_threads();
-#else
-   Index_t numthreads = 1;
-#endif
+   Index_t numthreads = 2;
 
   if (numthreads > 1) {
     // set up node-centered indexing of elements 

@@ -248,6 +248,53 @@ void TimeIncrement(Domain& domain)
 
 /******************************************/
 
+KOKKOS_INLINE_FUNCTION
+void CollectDomainNodesToElemNodes(real_t_view_1d x,
+                                   real_t_view_1d y,
+                                   real_t_view_1d z,
+                                   const Index_t* elemToNode,
+                                   Real_t elemX[8],
+                                   Real_t elemY[8],
+                                   Real_t elemZ[8])
+{
+   Index_t nd0i = elemToNode[0] ;
+   Index_t nd1i = elemToNode[1] ;
+   Index_t nd2i = elemToNode[2] ;
+   Index_t nd3i = elemToNode[3] ;
+   Index_t nd4i = elemToNode[4] ;
+   Index_t nd5i = elemToNode[5] ;
+   Index_t nd6i = elemToNode[6] ;
+   Index_t nd7i = elemToNode[7] ;
+
+   elemX[0] = x(nd0i);
+   elemX[1] = x(nd1i);
+   elemX[2] = x(nd2i);
+   elemX[3] = x(nd3i);
+   elemX[4] = x(nd4i);
+   elemX[5] = x(nd5i);
+   elemX[6] = x(nd6i);
+   elemX[7] = x(nd7i);
+
+   elemY[0] = y(nd0i);
+   elemY[1] = y(nd1i);
+   elemY[2] = y(nd2i);
+   elemY[3] = y(nd3i);
+   elemY[4] = y(nd4i);
+   elemY[5] = y(nd5i);
+   elemY[6] = y(nd6i);
+   elemY[7] = y(nd7i);
+
+   elemZ[0] = z(nd0i);
+   elemZ[1] = z(nd1i);
+   elemZ[2] = z(nd2i);
+   elemZ[3] = z(nd3i);
+   elemZ[4] = z(nd4i);
+   elemZ[5] = z(nd5i);
+   elemZ[6] = z(nd6i);
+   elemZ[7] = z(nd7i);
+
+}
+
 static inline
 void CollectDomainNodesToElemNodes(Domain &domain,
                                    const Index_t* elemToNode,
@@ -524,10 +571,78 @@ void SumElemStressesToNodeForces( const Real_t B[][8],
 
 /******************************************/
 
+struct IntegrateStressForElemsByElem{
+  real_t_view_1d x;
+  real_t_view_1d y;
+  real_t_view_1d z;
+  real_t_view_1d fx;
+  real_t_view_1d fy;
+  real_t_view_1d fz;
+  index_t_view_1d nodelist;
+  real_t_view_1d fx_elem;
+  real_t_view_1d fy_elem;
+  real_t_view_1d fz_elem;
+  real_t_view_1d sigxx;
+  real_t_view_1d sigyy;
+  real_t_view_1d sigzz;
+  real_t_view_1d determ;
+  Index_t numElem;
+
+  IntegrateStressForElemsByElem(
+        real_t_view_1d x_,
+        real_t_view_1d y_,
+        real_t_view_1d z_,
+        real_t_view_1d fx_,
+        real_t_view_1d fy_,
+        real_t_view_1d fz_,
+        index_t_view_1d nodelist_,
+        real_t_view_1d fx_elem_,
+        real_t_view_1d fy_elem_,
+        real_t_view_1d fz_elem_,
+        real_t_view_1d sigxx_,
+        real_t_view_1d sigyy_,
+        real_t_view_1d sigzz_,
+        real_t_view_1d determ_,
+        Index_t& numElem_):
+          x(x_), y(y_), z(z_),
+          fx(fx_), fy(fy_), fz(fz_),
+          nodelist(nodelist_), 
+          fx_elem(fx_elem_), fy_elem(fy_elem_), fz_elem(fz_elem_),
+          sigxx(sigxx_), sigyy(sigyy_), sigzz(sigzz_),
+          determ(determ_),
+          numElem(numElem_) {}
+
+  KOKKOS_INLINE_FUNCTION
+  void operator() (const int& k) const {
+    const Index_t* const elemToNode = &nodelist[Index_t(8)*k];
+    Real_t B[3][8] ;// shape function derivatives
+    Real_t x_local[8] ;
+    Real_t y_local[8] ;
+    Real_t z_local[8] ;
+
+    // get nodal coordinates from global arrays and copy into local arrays.
+    CollectDomainNodesToElemNodes(x, y, z, elemToNode, x_local, y_local, z_local);
+
+    // Volume calculation involves extra work for numerical consistency
+    CalcElemShapeFunctionDerivatives(x_local, y_local, z_local,
+                                         B, &determ[k]);
+
+    CalcElemNodeNormals( B[0] , B[1], B[2],
+                          x_local, y_local, z_local );
+
+     // Eliminate thread writing conflicts at the nodes by giving
+     // each element its own copy to write to
+     SumElemStressesToNodeForces( B, sigxx[k], sigyy[k], sigzz[k],
+                                  &fx_elem[k*8],
+                                  &fy_elem[k*8],
+                                  &fz_elem[k*8] ) ;
+  }
+};
+
 static inline
 void IntegrateStressForElems( Domain &domain,
-                              Real_t *sigxx, Real_t *sigyy, Real_t *sigzz,
-                              Real_t *determ, Index_t numElem, Index_t numNode)
+                              real_t_view_1d sigxx, real_t_view_1d sigyy, real_t_view_1d sigzz,
+                              real_t_view_1d determ, Index_t numElem, Index_t numNode)
 {
 #if _OPENMP
    Index_t numthreads = omp_get_max_threads();
@@ -539,84 +654,50 @@ void IntegrateStressForElems( Domain &domain,
    Real_t *fx_elem;
    Real_t *fy_elem;
    Real_t *fz_elem;
-   Real_t fx_local[8] ;
-   Real_t fy_local[8] ;
-   Real_t fz_local[8] ;
 
-
-  if (numthreads > 1) {
-     fx_elem = Allocate<Real_t>(numElem8) ;
-     fy_elem = Allocate<Real_t>(numElem8) ;
-     fz_elem = Allocate<Real_t>(numElem8) ;
-  }
+   fx_elem = Allocate<Real_t>(numElem8) ;
+   fy_elem = Allocate<Real_t>(numElem8) ;
+   fz_elem = Allocate<Real_t>(numElem8) ;
   // loop over all elements
 
-#pragma omp parallel for firstprivate(numElem)
-  for( Index_t k=0 ; k<numElem ; ++k )
-  {
-    const Index_t* const elemToNode = domain.nodelist(k);
-    Real_t B[3][8] ;// shape function derivatives
-    Real_t x_local[8] ;
-    Real_t y_local[8] ;
-    Real_t z_local[8] ;
+  real_t_view_1d fx_elem_(fx_elem, numElem8);
+  real_t_view_1d fy_elem_(fy_elem, numElem8);
+  real_t_view_1d fz_elem_(fz_elem, numElem8);
 
-    // get nodal coordinates from global arrays and copy into local arrays.
-    CollectDomainNodesToElemNodes(domain, elemToNode, x_local, y_local, z_local);
+  IntegrateStressForElemsByElem f0(
+      domain.x_view(), domain.y_view(), domain.z_view(),
+      domain.fx_view(), domain.fy_view(), domain.fz_view(),
+      domain.nodelist_view(),
+      fx_elem_, fy_elem_, fz_elem_,
+      sigxx, sigyy, sigzz,
+      determ,
+      numElem
+  );
+  Kokkos::parallel_for(f0.numElem, f0);
 
-    // Volume calculation involves extra work for numerical consistency
-    CalcElemShapeFunctionDerivatives(x_local, y_local, z_local,
-                                         B, &determ[k]);
-
-    CalcElemNodeNormals( B[0] , B[1], B[2],
-                          x_local, y_local, z_local );
-
-    if (numthreads > 1) {
-       // Eliminate thread writing conflicts at the nodes by giving
-       // each element its own copy to write to
-       SumElemStressesToNodeForces( B, sigxx[k], sigyy[k], sigzz[k],
-                                    &fx_elem[k*8],
-                                    &fy_elem[k*8],
-                                    &fz_elem[k*8] ) ;
-    }
-    else {
-       SumElemStressesToNodeForces( B, sigxx[k], sigyy[k], sigzz[k],
-                                    fx_local, fy_local, fz_local ) ;
-
-       // copy nodal force contributions to global force arrray.
-       for( Index_t lnode=0 ; lnode<8 ; ++lnode ) {
-          Index_t gnode = elemToNode[lnode];
-          domain.fx(gnode) += fx_local[lnode];
-          domain.fy(gnode) += fy_local[lnode];
-          domain.fz(gnode) += fz_local[lnode];
-       }
-    }
-  }
-
-  if (numthreads > 1) {
-     // If threaded, then we need to copy the data out of the temporary
-     // arrays used above into the final forces field
+   // If threaded, then we need to copy the data out of the temporary
+   // arrays used above into the final forces field
 #pragma omp parallel for firstprivate(numNode)
-     for( Index_t gnode=0 ; gnode<numNode ; ++gnode )
-     {
-        Index_t count = domain.nodeElemCount(gnode) ;
-        Index_t *cornerList = domain.nodeElemCornerList(gnode) ;
-        Real_t fx_tmp = Real_t(0.0) ;
-        Real_t fy_tmp = Real_t(0.0) ;
-        Real_t fz_tmp = Real_t(0.0) ;
-        for (Index_t i=0 ; i < count ; ++i) {
-           Index_t elem = cornerList[i] ;
-           fx_tmp += fx_elem[elem] ;
-           fy_tmp += fy_elem[elem] ;
-           fz_tmp += fz_elem[elem] ;
-        }
-        domain.fx(gnode) = fx_tmp ;
-        domain.fy(gnode) = fy_tmp ;
-        domain.fz(gnode) = fz_tmp ;
-     }
-     Release(&fz_elem) ;
-     Release(&fy_elem) ;
-     Release(&fx_elem) ;
-  }
+   for( Index_t gnode=0 ; gnode<numNode ; ++gnode )
+   {
+      Index_t count = domain.nodeElemCount(gnode) ;
+      Index_t *cornerList = domain.nodeElemCornerList(gnode) ;
+      Real_t fx_tmp = Real_t(0.0) ;
+      Real_t fy_tmp = Real_t(0.0) ;
+      Real_t fz_tmp = Real_t(0.0) ;
+      for (Index_t i=0 ; i < count ; ++i) {
+         Index_t elem = cornerList[i] ;
+         fx_tmp += fx_elem[elem] ;
+         fy_tmp += fy_elem[elem] ;
+         fz_tmp += fz_elem[elem] ;
+      }
+      domain.fx(gnode) = fx_tmp ;
+      domain.fy(gnode) = fy_tmp ;
+      domain.fz(gnode) = fz_tmp ;
+   }
+   Release(&fz_elem) ;
+   Release(&fy_elem) ;
+   Release(&fx_elem) ;
 }
 
 /******************************************/
@@ -1128,13 +1209,13 @@ void CalcVolumeForceForElems(Domain& domain)
       InitStressTermsForElems f0(domain.p_view(), domain.q_view(), sigxx_, sigyy_, sigzz_, numElem);
       Kokkos::parallel_for(f0.numElem, f0);
 
+      real_t_view_1d determ_(determ, numElem);
       // call elemlib stress integration loop to produce nodal forces from
       // material stresses.
       IntegrateStressForElems( domain,
-                               sigxx, sigyy, sigzz, determ, numElem,
+                               sigxx_, sigyy_, sigzz_, determ_, numElem,
                                domain.numNode()) ;
 
-      real_t_view_1d determ_(determ, numElem);
       CalcVolumeForceForElemsCheckError f1(determ_, numElem);
       Kokkos::parallel_for(f1.numElem, f1);
 
