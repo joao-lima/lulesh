@@ -24,6 +24,8 @@
 #include <math.h>
 #include <vector>
 
+#include <Kokkos_Core.hpp>
+
 //**************************************************
 // Allow flexibility for arithmetic representations 
 //**************************************************
@@ -54,6 +56,7 @@ inline real4  FABS(real4  arg) { return fabsf(arg) ; }
 inline real8  FABS(real8  arg) { return fabs(arg) ; }
 inline real10 FABS(real10 arg) { return fabsl(arg) ; }
 
+typedef Kokkos::View<Real_t*> real_t_view_1d;
 
 // Stuff needed for boundary conditions
 // 2 BCs on each of 6 hexahedral faces (12 bits)
@@ -174,8 +177,10 @@ class Domain {
 
       m_e.resize(numElem);
       m_p.resize(numElem);
+      m_p_view = real_t_view_1d(m_p.data(), numElem);
 
       m_q.resize(numElem);
+      m_q_view = real_t_view_1d(m_q.data(), numElem);
       m_ql.resize(numElem);
       m_qq.resize(numElem);
 
@@ -309,9 +314,11 @@ class Domain {
 
    // Pressure
    Real_t& p(Index_t idx)          { return m_p[idx] ; }
+   real_t_view_1d& p_view()        { return m_p_view; }
 
    // Artificial viscosity
    Real_t& q(Index_t idx)          { return m_q[idx] ; }
+   real_t_view_1d& q_view()        { return m_q_view; }
 
    // Linear term for q
    Real_t& ql(Index_t idx)         { return m_ql[idx] ; }
@@ -485,7 +492,9 @@ class Domain {
    std::vector<Real_t> m_e ;   /* energy */
 
    std::vector<Real_t> m_p ;   /* pressure */
+   real_t_view_1d m_p_view;
    std::vector<Real_t> m_q ;   /* q */
+   real_t_view_1d m_q_view;
    std::vector<Real_t> m_ql ;  /* linear term for q */
    std::vector<Real_t> m_qq ;  /* quadratic term for q */
 

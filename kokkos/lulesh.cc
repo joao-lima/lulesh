@@ -160,7 +160,6 @@ Additional BSD Notice
 
 #include "lulesh.h"
 
-
 /*********************************/
 /* Data structure implementation */
 /*********************************/
@@ -296,20 +295,28 @@ void CollectDomainNodesToElemNodes(Domain &domain,
 
 /******************************************/
 
-static inline
-void InitStressTermsForElems(Domain &domain,
-                             Real_t *sigxx, Real_t *sigyy, Real_t *sigzz,
-                             Index_t numElem)
-{
+struct InitStressTermsForElems {
+  real_t_view_1d p;
+  real_t_view_1d q;
+  real_t_view_1d sigxx;
+  real_t_view_1d sigyy;
+  real_t_view_1d sigzz;
+  Index_t numElem;
    //
    // pull in the stresses appropriate to the hydro integration
    //
+  
+  InitStressTermsForElems(real_t_view_1d p_, real_t_view_1d q_,
+          real_t_view_1d sigxx_, real_t_view_1d sigyy_, real_t_view_1d sigzz_, Index_t& numElem_): 
+          p(p_), q(q_), sigxx(sigxx_), sigyy(sigyy_),
+          sigzz(sigzz_), numElem(numElem_) {}
+ 
+    KOKKOS_INLINE_FUNCTION
+    void operator() (const int& i) const {
+      sigxx[i] = sigyy[i] = sigzz[i] =  - p(i) - q(i) ;
+    }
 
-#pragma omp parallel for firstprivate(numElem)
-   for (Index_t i = 0 ; i < numElem ; ++i){
-      sigxx[i] = sigyy[i] = sigzz[i] =  - domain.p(i) - domain.q(i) ;
-   }
-}
+};
 
 /******************************************/
 
@@ -1084,6 +1091,25 @@ void CalcHourglassControlForElems(Domain& domain,
 
 /******************************************/
 
+struct CalcVolumeForceForElemsCheckError {
+  Index_t numElem;
+  real_t_view_1d determ;
+
+  CalcVolumeForceForElemsCheckError(real_t_view_1d determ_, Index_t& numElem_):
+    determ(determ_), numElem(numElem_) {}
+
+  KOKKOS_INLINE_FUNCTION
+  void operator() (const int& i) const {
+     if (determ[i] <= Real_t(0.0)) {
+#if USE_MPI            
+        MPI_Abort(MPI_COMM_WORLD, VolumeError) ;
+#else
+        exit(VolumeError);
+#endif
+     }
+  }
+};
+
 static inline
 void CalcVolumeForceForElems(Domain& domain)
 {
@@ -1094,9 +1120,13 @@ void CalcVolumeForceForElems(Domain& domain)
       Real_t *sigyy  = Allocate<Real_t>(numElem) ;
       Real_t *sigzz  = Allocate<Real_t>(numElem) ;
       Real_t *determ = Allocate<Real_t>(numElem) ;
-
+      real_t_view_1d sigxx_(sigxx, numElem);
+      real_t_view_1d sigyy_(sigyy, numElem);
+      real_t_view_1d sigzz_(sigzz, numElem);
+      
       /* Sum contributions to total stress tensor */
-      InitStressTermsForElems(domain, sigxx, sigyy, sigzz, numElem);
+      InitStressTermsForElems f0(domain.p_view(), domain.q_view(), sigxx_, sigyy_, sigzz_, numElem);
+      Kokkos::parallel_for(f0.numElem, f0);
 
       // call elemlib stress integration loop to produce nodal forces from
       // material stresses.
@@ -1104,17 +1134,9 @@ void CalcVolumeForceForElems(Domain& domain)
                                sigxx, sigyy, sigzz, determ, numElem,
                                domain.numNode()) ;
 
-      // check for negative element volume
-#pragma omp parallel for firstprivate(numElem)
-      for ( Index_t k=0 ; k<numElem ; ++k ) {
-         if (determ[k] <= Real_t(0.0)) {
-#if USE_MPI            
-            MPI_Abort(MPI_COMM_WORLD, VolumeError) ;
-#else
-            exit(VolumeError);
-#endif
-         }
-      }
+      real_t_view_1d determ_(determ, numElem);
+      CalcVolumeForceForElemsCheckError f1(determ_, numElem);
+      Kokkos::parallel_for(f1.numElem, f1);
 
       CalcHourglassControlForElems(domain, determ, hgcoef) ;
 
