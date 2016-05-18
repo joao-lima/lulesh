@@ -437,6 +437,10 @@ class Domain {
    MPI_Request sendRequest[26] ; // 6 faces + 12 edges + 8 corners 
 #endif
 
+// Kokkos views 
+   index_t_view_1d nodeElemStart_view;
+   index_t_view_1d nodeElemCornerList_view;
+
   private:
 
    void BuildMesh(Int_t nx, Int_t edgeNodes, Int_t edgeElems);

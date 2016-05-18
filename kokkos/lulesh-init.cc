@@ -260,6 +260,7 @@ Domain::SetupThreadSupportStructures()
     }
 
     m_nodeElemStart = new Index_t[numNode()+1] ;
+    nodeElemStart_view = index_t_view_1d(m_nodeElemStart, numNode()+1);
 
     m_nodeElemStart[0] = 0;
 
@@ -269,6 +270,7 @@ Domain::SetupThreadSupportStructures()
     }
        
     m_nodeElemCornerList = new Index_t[m_nodeElemStart[numNode()]];
+    nodeElemCornerList_view = index_t_view_1d(m_nodeElemCornerList, numNode()+1);
 
     for (Index_t i=0; i < numNode(); ++i) {
       nodeElemCount[i] = 0;

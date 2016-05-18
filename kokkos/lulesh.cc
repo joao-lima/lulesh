@@ -639,17 +639,58 @@ struct IntegrateStressForElemsByElem{
   }
 };
 
+struct IntegrateStressForElemsByNode{
+  real_t_view_1d fx;
+  real_t_view_1d fy;
+  real_t_view_1d fz;
+  real_t_view_1d fx_elem;
+  real_t_view_1d fy_elem;
+  real_t_view_1d fz_elem;
+  index_t_view_1d nodeElemStart;
+  index_t_view_1d nodeElemCornerList;
+  Index_t numNode;
+
+  IntegrateStressForElemsByNode(
+    real_t_view_1d fx_,
+    real_t_view_1d fy_, 
+    real_t_view_1d fz_,
+    real_t_view_1d fx_elem_,
+    real_t_view_1d fy_elem_,
+    real_t_view_1d fz_elem_,
+    index_t_view_1d nodeElemStart_,
+    index_t_view_1d nodeElemCornerList_,
+    Index_t& numNode_
+    ) :
+     fx(fx_), fy(fy_), fz(fz_),
+     fx_elem(fx_elem_), fy_elem(fy_elem_), fz_elem(fz_elem_),
+     nodeElemStart(nodeElemStart_), 
+     nodeElemCornerList(nodeElemCornerList_),
+     numNode(numNode_) {}
+
+  KOKKOS_INLINE_FUNCTION
+  void operator() (const int& i) const {
+      Index_t count = nodeElemStart[i+1] - nodeElemStart[i];
+      Index_t *cornerList = &nodeElemCornerList[nodeElemStart[i]];
+      Real_t fx_tmp = Real_t(0.0) ;
+      Real_t fy_tmp = Real_t(0.0) ;
+      Real_t fz_tmp = Real_t(0.0) ;
+      for (Index_t i=0 ; i < count ; ++i) {
+         Index_t elem = cornerList[i] ;
+         fx_tmp += fx_elem[elem] ;
+         fy_tmp += fy_elem[elem] ;
+         fz_tmp += fz_elem[elem] ;
+      }
+      fx(i) = fx_tmp ;
+      fy(i) = fy_tmp ;
+      fz(i) = fz_tmp ;
+  }
+};
+
 static inline
 void IntegrateStressForElems( Domain &domain,
                               real_t_view_1d sigxx, real_t_view_1d sigyy, real_t_view_1d sigzz,
                               real_t_view_1d determ, Index_t numElem, Index_t numNode)
 {
-#if _OPENMP
-   Index_t numthreads = omp_get_max_threads();
-#else
-   Index_t numthreads = 1;
-#endif
-
    Index_t numElem8 = numElem * 8 ;
    Real_t *fx_elem;
    Real_t *fy_elem;
@@ -677,24 +718,14 @@ void IntegrateStressForElems( Domain &domain,
 
    // If threaded, then we need to copy the data out of the temporary
    // arrays used above into the final forces field
-#pragma omp parallel for firstprivate(numNode)
-   for( Index_t gnode=0 ; gnode<numNode ; ++gnode )
-   {
-      Index_t count = domain.nodeElemCount(gnode) ;
-      Index_t *cornerList = domain.nodeElemCornerList(gnode) ;
-      Real_t fx_tmp = Real_t(0.0) ;
-      Real_t fy_tmp = Real_t(0.0) ;
-      Real_t fz_tmp = Real_t(0.0) ;
-      for (Index_t i=0 ; i < count ; ++i) {
-         Index_t elem = cornerList[i] ;
-         fx_tmp += fx_elem[elem] ;
-         fy_tmp += fy_elem[elem] ;
-         fz_tmp += fz_elem[elem] ;
-      }
-      domain.fx(gnode) = fx_tmp ;
-      domain.fy(gnode) = fy_tmp ;
-      domain.fz(gnode) = fz_tmp ;
-   }
+   IntegrateStressForElemsByNode f1(
+      domain.fx_view(), domain.fy_view(), domain.fz_view(),
+      fx_elem_, fy_elem_, fz_elem_,
+      domain.nodeElemStart_view, domain.nodeElemCornerList_view,
+      numNode
+   );
+  Kokkos::parallel_for(f1.numNode, f1);
+
    Release(&fz_elem) ;
    Release(&fy_elem) ;
    Release(&fx_elem) ;
