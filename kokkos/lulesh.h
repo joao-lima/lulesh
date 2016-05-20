@@ -193,8 +193,10 @@ class Domain {
       m_qq.resize(numElem);
 
       m_v.resize(numElem);
+      m_v_view = real_t_view_1d(m_v.data(), numElem);
 
       m_volo.resize(numElem);
+      m_volo_view = real_t_view_1d(m_volo.data(), numElem);
       m_delv.resize(numElem);
       m_vdov.resize(numElem);
 
@@ -344,10 +346,12 @@ class Domain {
 
    // Relative volume
    Real_t& v(Index_t idx)          { return m_v[idx] ; }
+   real_t_view_1d& v_view()        { return m_v_view; }
    Real_t& delv(Index_t idx)       { return m_delv[idx] ; }
 
    // Reference volume
    Real_t& volo(Index_t idx)       { return m_volo[idx] ; }
+   real_t_view_1d& volo_view()        { return m_volo_view; }
 
    // volume derivative over volume
    Real_t& vdov(Index_t idx)       { return m_vdov[idx] ; }
@@ -531,6 +535,8 @@ class Domain {
    std::vector<Real_t> m_vnew ;  /* new relative volume -- temporary */
    std::vector<Real_t> m_delv ;  /* m_vnew - m_v */
    std::vector<Real_t> m_vdov ;  /* volume derivative over volume */
+   real_t_view_1d m_v_view;
+   real_t_view_1d m_volo_view;
 
    std::vector<Real_t> m_arealg ;  /* characteristic length of an element */
    

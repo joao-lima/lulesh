@@ -367,7 +367,7 @@ struct InitStressTermsForElems {
 
 /******************************************/
 
-static inline
+KOKKOS_INLINE_FUNCTION
 void CalcElemShapeFunctionDerivatives( Real_t const x[],
                                        Real_t const y[],
                                        Real_t const z[],
@@ -854,7 +854,7 @@ void CalcElemFBHourglassForce(Real_t *xd, Real_t *yd, Real_t *zd,  Real_t hourga
 
 static inline
 void CalcFBHourglassForceForElems( Domain &domain,
-                                   Real_t *determ,
+                                   real_t_view_1d determ,
                                    Real_t *x8n, Real_t *y8n, Real_t *z8n,
                                    Real_t *dvdx, Real_t *dvdy, Real_t *dvdz,
                                    Real_t hourg, Index_t numElem,
@@ -1137,27 +1137,50 @@ void CalcFBHourglassForceForElems( Domain &domain,
 
 /******************************************/
 
-static inline
-void CalcHourglassControlForElems(Domain& domain,
-                                  Real_t determ[], Real_t hgcoef)
-{
-   Index_t numElem = domain.numElem() ;
-   Index_t numElem8 = numElem * 8 ;
-   Real_t *dvdx = Allocate<Real_t>(numElem8) ;
-   Real_t *dvdy = Allocate<Real_t>(numElem8) ;
-   Real_t *dvdz = Allocate<Real_t>(numElem8) ;
-   Real_t *x8n  = Allocate<Real_t>(numElem8) ;
-   Real_t *y8n  = Allocate<Real_t>(numElem8) ;
-   Real_t *z8n  = Allocate<Real_t>(numElem8) ;
+struct CalcHourglassControlForElemsKernel {
+  real_t_view_1d x;
+  real_t_view_1d y;
+  real_t_view_1d z;
+  index_t_view_1d nodelist;
+  real_t_view_1d v;
+  real_t_view_1d volo;
+  real_t_view_1d determ;
+  real_t_view_1d dvdx;
+  real_t_view_1d dvdy;
+  real_t_view_1d dvdz;
+  real_t_view_1d x8n;
+  real_t_view_1d y8n;
+  real_t_view_1d z8n;
+  Index_t numElem;
 
-   /* start loop over elements */
-#pragma omp parallel for firstprivate(numElem)
-   for (Index_t i=0 ; i<numElem ; ++i){
+  CalcHourglassControlForElemsKernel(
+      real_t_view_1d x_,
+      real_t_view_1d y_,
+      real_t_view_1d z_,
+      index_t_view_1d nodelist_,
+      real_t_view_1d v_,
+      real_t_view_1d volo_,
+      real_t_view_1d determ_,
+      real_t_view_1d dvdx_,
+      real_t_view_1d dvdy_,
+      real_t_view_1d dvdz_,
+      real_t_view_1d x8n_,
+      real_t_view_1d y8n_,
+      real_t_view_1d z8n_,
+      Index_t& numElem_):
+    x(x_), y(y_), z(z_),
+    dvdx(dvdx_), dvdy(dvdy_), dvdz(dvdz_),
+    x8n(x8n_), y8n(y8n_), z8n(z8n_),
+    nodelist(nodelist_), v(v_), volo(volo_),
+    determ(determ_), numElem(numElem_) {}
+
+  KOKKOS_INLINE_FUNCTION
+  void operator() (const int& i) const {
       Real_t  x1[8],  y1[8],  z1[8] ;
       Real_t pfx[8], pfy[8], pfz[8] ;
 
-      Index_t* elemToNode = domain.nodelist(i);
-      CollectDomainNodesToElemNodes(domain, elemToNode, x1, y1, z1);
+      Index_t* elemToNode = &nodelist[Index_t(8)*i];
+      CollectDomainNodesToElemNodes(x, y, z, elemToNode, x1, y1, z1);
 
       CalcElemVolumeDerivative(pfx, pfy, pfz, x1, y1, z1);
 
@@ -1173,17 +1196,50 @@ void CalcHourglassControlForElems(Domain& domain,
          z8n[jj]  = z1[ii];
       }
 
-      determ[i] = domain.volo(i) * domain.v(i);
+      determ[i] = volo(i) * v(i);
 
       /* Do a check for negative volumes */
-      if ( domain.v(i) <= Real_t(0.0) ) {
+      if ( v(i) <= Real_t(0.0) ) {
 #if USE_MPI         
          MPI_Abort(MPI_COMM_WORLD, VolumeError) ;
 #else
          exit(VolumeError);
 #endif
       }
-   }
+  }
+};
+
+static inline
+void CalcHourglassControlForElems(Domain& domain,
+                                  real_t_view_1d determ, Real_t hgcoef)
+{
+   Index_t numElem = domain.numElem() ;
+   Index_t numElem8 = numElem * 8 ;
+   Real_t *dvdx = Allocate<Real_t>(numElem8) ;
+   Real_t *dvdy = Allocate<Real_t>(numElem8) ;
+   Real_t *dvdz = Allocate<Real_t>(numElem8) ;
+   Real_t *x8n  = Allocate<Real_t>(numElem8) ;
+   Real_t *y8n  = Allocate<Real_t>(numElem8) ;
+   Real_t *z8n  = Allocate<Real_t>(numElem8) ;
+
+   real_t_view_1d dvdx_(dvdx, numElem8);
+   real_t_view_1d dvdy_(dvdy, numElem8);
+   real_t_view_1d dvdz_(dvdz, numElem8);
+   real_t_view_1d x8n_(x8n, numElem8);
+   real_t_view_1d y8n_(y8n, numElem8);
+   real_t_view_1d z8n_(z8n, numElem8);
+
+   CalcHourglassControlForElemsKernel f0(
+      domain.x_view(), domain.y_view(), domain.z_view(),
+      domain.nodelist_view(),
+      domain.v_view(),
+      domain.volo_view(),
+      determ,
+      dvdx_, dvdy_, dvdz_,
+      x8n_, y8n_, z8n_,
+      numElem
+      );
+   Kokkos::parallel_for(f0.numElem, f0);
 
    if ( hgcoef > Real_t(0.) ) {
       CalcFBHourglassForceForElems( domain,
@@ -1250,7 +1306,7 @@ void CalcVolumeForceForElems(Domain& domain)
       CalcVolumeForceForElemsCheckError f1(determ_, numElem);
       Kokkos::parallel_for(f1.numElem, f1);
 
-      CalcHourglassControlForElems(domain, determ, hgcoef) ;
+      CalcHourglassControlForElems(domain, determ_, hgcoef) ;
 
       Release(&determ) ;
       Release(&sigzz) ;
